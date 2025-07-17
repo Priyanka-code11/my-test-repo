@@ -1,36 +1,54 @@
-# 🎤 Audio Transcription Application
+# 🎤 Azure Speech Services Audio Transcription Application
 
-A real-time audio transcription application with FastAPI backend and Gradio frontend, supporting both Fast and Batch transcription approaches.
+A professional audio transcription application powered by Azure Speech Services, featuring FastAPI backend and Gradio frontend with both real-time and batch transcription capabilities.
 
 ## 🏗️ Architecture
 
-- **Backend**: FastAPI with speech recognition capabilities
-- **Frontend**: Gradio web interface with audio recording
-- **Transcription**: Supports two modes:
-  - **Fast Transcription**: Real-time processing of audio chunks
-  - **Batch Transcription**: Process all chunks together at the end
+- **Backend**: FastAPI with Azure Speech Services integration
+- **Frontend**: Gradio web interface with live audio processing
+- **Speech Services**: Azure Cognitive Services Speech-to-Text
+- **Transcription Modes**: 
+  - **Fast Transcription**: Azure Real-time Speech Recognition API
+  - **Batch Transcription**: Azure Batch Speech Recognition API
 
 ## 📋 Features
 
-- ✅ Real-time audio recording in 2-minute chunks
-- ✅ Two transcription approaches (Fast vs Batch)
-- ✅ Session management with unique IDs
-- ✅ RESTful API with comprehensive endpoints
-- ✅ Modern web interface with real-time updates
-- ✅ Audio file storage and management
-- ✅ Error handling and status tracking
+- ✅ **Azure Speech Services Integration**: Professional-grade transcription
+- ✅ **Real-time Processing**: Immediate transcription with Azure Real-time API
+- ✅ **Batch Processing**: Optimized bulk transcription with Azure Batch API
+- ✅ **Conversation Export**: Complete transcription saved to text files
+- ✅ **Session Management**: Unique session IDs with proper cleanup
+- ✅ **Live Dashboard**: Real-time status updates and progress monitoring
+- ✅ **Error Handling**: Comprehensive error handling and recovery
+- ✅ **Audio Chunking**: 2-minute audio segments for optimal processing
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.8+
-- Internet connection (for Google Speech Recognition API)
+- Azure Speech Services subscription
+- Audio input device (microphone)
 
-### Option 1: Using Startup Scripts (Recommended)
+### 1. Azure Setup
+
+1. **Create Azure Speech Service**:
+   - Go to [Azure Portal](https://portal.azure.com)
+   - Create a new "Speech" resource
+   - Note your **subscription key** and **region**
+
+2. **Configure Environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Azure Speech credentials
+   ```
+
+### 2. Quick Start (Recommended)
 
 1. **Start the Backend** (in terminal 1):
    ```bash
+   export AZURE_SPEECH_KEY="your_key_here"
+   export AZURE_SPEECH_REGION="your_region"
    ./start_backend.sh
    ```
 
@@ -39,7 +57,7 @@ A real-time audio transcription application with FastAPI backend and Gradio fron
    ./start_frontend.sh
    ```
 
-### Option 2: Manual Setup
+### 3. Manual Setup
 
 #### Backend Setup
 

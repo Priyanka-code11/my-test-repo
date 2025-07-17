@@ -1,37 +1,53 @@
-# 🎤 Audio Transcription App - Testing Guide
+# 🎤 Azure Speech Audio Transcription - Testing Guide
 
 ## Overview
-Your audio transcription application is now ready for testing! The system includes:
-- **FastAPI Backend**: Handles audio processing and transcription
-- **Gradio Frontend**: User-friendly web interface
-- **Two Transcription Modes**: Fast (real-time) and Batch (process all at once)
+Your Azure-powered audio transcription application is now ready for testing! The system includes:
+- **Azure Speech Services**: Professional-grade transcription engine
+- **FastAPI Backend**: Handles audio processing and Azure integration
+- **Gradio Frontend**: User-friendly web interface with real-time updates
+- **Two Transcription Modes**: 
+  - Fast (Azure Real-time API)
+  - Batch (Azure Batch API)
+- **Conversation Export**: Complete transcriptions saved to text files
 
 ## 🚀 Quick Test Setup
 
-### Option 1: Start Both Services (Recommended)
+### Prerequisites
+1. **Azure Speech Service configured** (see `AZURE_SETUP.md`)
+2. **Environment variables set**:
+   ```bash
+   export AZURE_SPEECH_KEY="your_azure_key"
+   export AZURE_SPEECH_REGION="your_azure_region"
+   ```
+
+### Option 1: Use Startup Scripts (Recommended)
+
+1. **Terminal 1 - Start Azure Backend**:
+   ```bash
+   ./start_backend.sh
+   ```
+   
+2. **Terminal 2 - Start Frontend**:
+   ```bash
+   ./start_frontend.sh
+   ```
+
+### Option 2: Manual Start
 
 1. **Terminal 1 - Start Backend**:
    ```bash
    cd backend
    source venv/bin/activate
+   export AZURE_SPEECH_KEY="your_key"
+   export AZURE_SPEECH_REGION="your_region"
    python main.py
    ```
    
 2. **Terminal 2 - Start Frontend**:
    ```bash
-   python frontend/app.py
-   ```
-
-### Option 2: Use Startup Scripts
-
-1. **Terminal 1**:
-   ```bash
-   ./start_backend.sh
-   ```
-   
-2. **Terminal 2**:
-   ```bash
-   ./start_frontend.sh
+   cd frontend
+   source venv/bin/activate
+   python app.py
    ```
 
 ## 🌐 Access Points

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🎨 Starting Audio Transcription Frontend..."
+echo "🎨 Starting Azure Audio Transcription Frontend..."
 
 # Check if virtual environment exists
 if [ ! -d "frontend/venv" ]; then
@@ -14,10 +14,11 @@ fi
 source frontend/venv/bin/activate
 
 # Install dependencies
-echo "📥 Installing dependencies..."
+echo "📥 Installing Gradio and dependencies..."
 pip install -r frontend/requirements.txt
 
 # Start the Gradio app
-echo "🎯 Starting Gradio app on http://localhost:7860"
+echo "🎯 Starting Azure Speech Gradio app on http://localhost:7860"
+echo "🔗 Make sure the backend is running on http://localhost:8000"
 cd frontend
 python app.py

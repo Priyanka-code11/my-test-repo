@@ -20,9 +20,24 @@ is_recording = False
 chunk_counter = 0
 recording_thread = None
 transcriptions = []
+current_approach = "fast"
+
+def check_backend_status():
+    """Check if Azure backend is running"""
+    try:
+        response = requests.get(f"{BACKEND_URL}/health")
+        if response.status_code == 200:
+            data = response.json()
+            azure_configured = data.get("azure_speech_configured", False)
+            region = data.get("azure_speech_region", "unknown")
+            return f"✅ Azure Speech Backend Online | Region: {region} | Configured: {'✅' if azure_configured else '❌'}"
+        else:
+            return "❌ Backend responding but unhealthy"
+    except Exception as e:
+        return "❌ Backend not running - Please start the FastAPI server"
 
 def create_session():
-    """Create a new session with the backend"""
+    """Create a new session with the Azure backend"""
     try:
         response = requests.post(f"{BACKEND_URL}/create_session")
         if response.status_code == 200:
@@ -34,7 +49,7 @@ def create_session():
         return None
 
 def upload_audio_chunk(session_id, approach, chunk_id, audio_data):
-    """Upload audio chunk to backend"""
+    """Upload audio chunk to Azure backend"""
     try:
         # Convert audio data to WAV format
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
@@ -45,7 +60,7 @@ def upload_audio_chunk(session_id, approach, chunk_id, audio_data):
                 wav_file.setframerate(16000)  # 16kHz
                 wav_file.writeframes(audio_data.tobytes())
             
-            # Upload to backend
+            # Upload to Azure backend
             with open(tmp_file.name, 'rb') as audio_file:
                 files = {'audio_file': audio_file}
                 data = {
@@ -66,11 +81,11 @@ def upload_audio_chunk(session_id, approach, chunk_id, audio_data):
     except Exception as e:
         return {"error": f"Error uploading audio: {str(e)}"}
 
-def batch_transcribe(session_id):
-    """Request batch transcription for all chunks"""
+def process_batch_transcription(session_id):
+    """Request batch transcription for all chunks using Azure Batch API"""
     try:
         data = {'session_id': session_id}
-        response = requests.post(f"{BACKEND_URL}/batch_transcribe", data=data)
+        response = requests.post(f"{BACKEND_URL}/process_batch", data=data)
         if response.status_code == 200:
             return response.json()
         else:
@@ -78,17 +93,36 @@ def batch_transcribe(session_id):
     except Exception as e:
         return {"error": f"Error in batch transcription: {str(e)}"}
 
+def get_conversation_transcription(session_id):
+    """Get the complete conversation transcription and save to file"""
+    try:
+        data = {'session_id': session_id}
+        response = requests.post(f"{BACKEND_URL}/get_conversation_transcription", data=data)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Failed to get conversation transcription: {response.text}"}
+    except Exception as e:
+        return {"error": f"Error getting conversation transcription: {str(e)}"}
+
 def start_recording(approach, microphone_input):
     """Start recording audio"""
-    global current_session_id, is_recording, chunk_counter, recording_thread, transcriptions
+    global current_session_id, is_recording, chunk_counter, recording_thread, transcriptions, current_approach
     
     if is_recording:
-        return "Already recording!", gr.update(), gr.update()
+        return "Already recording!", gr.update(), gr.update(), gr.update()
     
     # Create new session
     current_session_id = create_session()
     if not current_session_id:
-        return "Failed to create session!", gr.update(), gr.update()
+        return "Failed to create session with Azure backend!", gr.update(), gr.update(), gr.update()
+    
+    # Map approach names
+    approach_map = {
+        "Fast Transcription": "fast",
+        "Batch Transcription": "batch"
+    }
+    current_approach = approach_map.get(approach, "fast")
     
     is_recording = True
     chunk_counter = 0
@@ -97,22 +131,23 @@ def start_recording(approach, microphone_input):
     # Start recording in a separate thread
     recording_thread = threading.Thread(
         target=record_audio_chunks, 
-        args=(approach, microphone_input)
+        args=(current_approach, microphone_input)
     )
     recording_thread.start()
     
     return (
-        f"Recording started! Session: {current_session_id[:8]}...\nApproach: {approach}",
+        f"🎤 Recording started!\n📋 Session: {current_session_id[:8]}...\n🔧 Approach: {approach}\n⏱️ Recording 2-min chunks...",
         gr.update(interactive=False),  # Disable start button
-        gr.update(interactive=True)    # Enable stop button
+        gr.update(interactive=True),   # Enable stop button
+        ""  # Clear conversation display
     )
 
 def stop_recording():
-    """Stop recording audio"""
-    global is_recording, current_session_id, transcriptions
+    """Stop recording audio and get complete conversation transcription"""
+    global is_recording, current_session_id, transcriptions, current_approach
     
     if not is_recording:
-        return "Not currently recording!", gr.update(), gr.update(), ""
+        return "Not currently recording!", gr.update(), gr.update(), "", ""
     
     is_recording = False
     
@@ -120,31 +155,39 @@ def stop_recording():
     if recording_thread:
         recording_thread.join(timeout=5)
     
-    final_transcription = ""
+    status_msg = f"⏹️ Recording stopped!\n📊 Processed {len(transcriptions)} chunks\n🔄 Generating final transcription..."
     
-    # If batch mode, request batch transcription
-    if transcriptions and len(transcriptions) > 0:
-        # Check if we need to do batch processing
-        if any("Stored for batch processing" in t.get("transcription", "") for t in transcriptions):
-            batch_result = batch_transcribe(current_session_id)
+    conversation_text = ""
+    
+    try:
+        if current_approach == "batch":
+            # For batch mode, process all chunks together
+            batch_result = process_batch_transcription(current_session_id)
             if "error" not in batch_result:
-                final_transcription = batch_result.get("full_transcription", "")
+                conversation_text = batch_result.get("full_transcription", "No transcription available")
             else:
-                final_transcription = f"Error: {batch_result['error']}"
+                conversation_text = f"❌ Error: {batch_result['error']}"
+        
+        # Get the complete conversation transcription (works for both approaches)
+        conversation_result = get_conversation_transcription(current_session_id)
+        if "error" not in conversation_result:
+            conversation_text = conversation_result.get("conversation_transcription", "No transcription available")
+            file_path = conversation_result.get("file_path", "Not saved")
+            status_msg += f"\n💾 Saved to: {file_path}"
         else:
-            # Combine fast transcriptions
-            final_transcription = "\n".join([
-                f"[Chunk {t.get('chunk_id', 'N/A')}]: {t.get('transcription', 'No transcription')}"
-                for t in transcriptions
-            ])
+            conversation_text = f"❌ Error getting conversation: {conversation_result['error']}"
+            
+    except Exception as e:
+        conversation_text = f"❌ Error processing transcription: {str(e)}"
     
-    status_msg = f"Recording stopped! Processed {len(transcriptions)} chunks."
+    final_status = f"✅ Recording completed!\n📈 Total chunks: {len(transcriptions)}\n📝 Transcription ready!\n🎯 Approach used: {current_approach.upper()}"
     
     return (
-        status_msg,
+        final_status,
         gr.update(interactive=True),   # Enable start button
         gr.update(interactive=False),  # Disable stop button
-        final_transcription
+        conversation_text,  # Display conversation transcription
+        get_real_time_transcription()  # Update real-time display
     )
 
 def record_audio_chunks(approach, microphone_input):
@@ -153,26 +196,33 @@ def record_audio_chunks(approach, microphone_input):
     
     while is_recording:
         try:
-            # Simulate 2-minute recording (shortened for demo - 10 seconds)
-            chunk_duration = 10  # seconds (change to 120 for actual 2 minutes)
+            # 2-minute chunks (shortened to 15 seconds for demo)
+            chunk_duration = 15  # seconds (change to 120 for actual 2 minutes)
             
-            # Simulate audio recording (in real implementation, this would capture from microphone)
-            # For demo purposes, we'll create a simple sine wave
+            # Simulate audio recording (in real implementation, capture from microphone)
+            # Creating a more realistic audio pattern for demo
             sample_rate = 16000
             duration = chunk_duration
-            samples = np.sin(2 * np.pi * 440 * np.linspace(0, duration, int(sample_rate * duration)))
-            audio_data = (samples * 32767).astype(np.int16)
+            
+            # Generate different tones for each chunk to simulate different speech
+            base_freq = 300 + (chunk_counter * 50)  # Varying frequency
+            samples = np.sin(2 * np.pi * base_freq * np.linspace(0, duration, int(sample_rate * duration)))
+            # Add some noise to make it more realistic
+            noise = np.random.normal(0, 0.1, samples.shape)
+            samples = samples + noise
+            audio_data = (samples * 32767 * 0.5).astype(np.int16)
             
             chunk_counter += 1
             
-            # Upload chunk to backend
-            result = upload_audio_chunk(current_session_id, approach.lower(), chunk_counter, audio_data)
+            # Upload chunk to Azure backend
+            result = upload_audio_chunk(current_session_id, approach, chunk_counter, audio_data)
             
             if "error" not in result:
                 transcriptions.append(result)
                 print(f"Chunk {chunk_counter} processed: {result.get('transcription', 'No transcription')}")
             else:
                 print(f"Error processing chunk {chunk_counter}: {result['error']}")
+                transcriptions.append({"error": result["error"], "chunk_id": chunk_counter})
             
             # Wait before next chunk (or until stopped)
             for _ in range(chunk_duration):
@@ -185,121 +235,165 @@ def record_audio_chunks(approach, microphone_input):
             break
 
 def get_real_time_transcription():
-    """Get real-time transcription updates for fast mode"""
-    global transcriptions
+    """Get real-time transcription updates"""
+    global transcriptions, current_approach
     
     if not transcriptions:
-        return "No transcriptions yet..."
+        return "📭 No transcriptions yet...\n🎤 Start recording to see real-time results!"
     
-    # Return the latest transcriptions
+    if current_approach == "batch":
+        return f"📦 Batch Mode Active\n🔄 Collected {len(transcriptions)} chunks\n⏳ Transcription will be processed when you stop recording"
+    
+    # For fast mode, show recent transcriptions
     recent_transcriptions = []
     for t in transcriptions[-5:]:  # Show last 5 chunks
-        if t.get("status") == "processed":
-            recent_transcriptions.append(
-                f"[Chunk {t.get('chunk_id')}] {t.get('timestamp', '')[:19]}: {t.get('transcription', '')}"
-            )
+        if "error" not in t:
+            transcription_preview = t.get('transcription', 'Processing...')
+            if transcription_preview and not transcription_preview.startswith('['):
+                recent_transcriptions.append(
+                    f"🎵 Chunk {t.get('chunk_id', 'N/A')}: {transcription_preview[:100]}{'...' if len(transcription_preview) > 100 else ''}"
+                )
+            else:
+                recent_transcriptions.append(f"🔄 Chunk {t.get('chunk_id', 'N/A')}: {transcription_preview}")
+        else:
+            recent_transcriptions.append(f"❌ Chunk {t.get('chunk_id', 'N/A')}: {t.get('error', 'Unknown error')}")
     
-    return "\n".join(recent_transcriptions) if recent_transcriptions else "Processing..."
+    if recent_transcriptions:
+        return "🔴 LIVE TRANSCRIPTION (Fast Mode):\n" + "\n".join(recent_transcriptions)
+    else:
+        return "🔄 Processing audio chunks..."
 
-# Create Gradio interface
-with gr.Blocks(title="Audio Transcription App", theme=gr.themes.Soft()) as app:
-    gr.Markdown("# 🎤 Audio Transcription Application")
-    gr.Markdown("Record audio and get transcriptions using Fast or Batch processing modes.")
+# Create Gradio interface with Azure Speech Services theme
+with gr.Blocks(
+    title="Azure Speech Audio Transcription", 
+    theme=gr.themes.Soft(),
+    css=".gradio-container {background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);}"
+) as app:
+    
+    gr.Markdown("""
+    # 🎤 Azure Speech Services Audio Transcription
+    ### Real-time and Batch Audio Processing with Conversation Export
+    """)
+    
+    # Backend status check
+    backend_status = gr.Textbox(
+        label="🔧 Backend Status",
+        value=check_backend_status(),
+        interactive=False,
+        lines=1
+    )
     
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("### Settings")
+            gr.Markdown("### ⚙️ Configuration")
             
             approach_dropdown = gr.Dropdown(
                 choices=["Fast Transcription", "Batch Transcription"],
                 value="Fast Transcription",
-                label="Select AI Approach",
-                info="Fast: Real-time processing, Batch: Process all at once"
+                label="🤖 Select Transcription Approach",
+                info="Fast: Azure Real-time API | Batch: Azure Batch API"
             )
             
             microphone_checkbox = gr.Checkbox(
-                label="Use Microphone",
+                label="🎙️ Use Microphone",
                 value=True,
-                info="Enable microphone input"
+                info="Enable microphone input (simulated in demo)"
             )
             
+            gr.Markdown("### 🎛️ Controls")
+            
             with gr.Row():
-                start_btn = gr.Button("🎙️ Start Recording", variant="primary")
-                stop_btn = gr.Button("⏹️ Stop Recording", variant="stop", interactive=False)
+                start_btn = gr.Button("🎙️ Start Recording", variant="primary", size="lg")
+                stop_btn = gr.Button("⏹️ Stop Recording", variant="stop", interactive=False, size="lg")
         
         with gr.Column(scale=2):
-            gr.Markdown("### Status & Results")
+            gr.Markdown("### 📊 Live Status & Results")
             
             status_display = gr.Textbox(
-                label="Status",
-                value="Ready to start recording...",
+                label="📋 Recording Status",
+                value="Ready to start recording with Azure Speech Services...",
                 interactive=False,
-                lines=3
+                lines=4
             )
             
             real_time_transcription = gr.Textbox(
-                label="Real-time Transcription (Fast Mode)",
+                label="⚡ Real-time Transcription",
                 value="",
                 interactive=False,
-                lines=5
+                lines=6,
+                placeholder="Real-time results will appear here during Fast Transcription mode..."
             )
-            
-            final_transcription = gr.Textbox(
-                label="Final Transcription",
-                value="",
-                interactive=False,
-                lines=10
-            )
+    
+    # Conversation transcription display (shown after stopping)
+    conversation_display = gr.Textbox(
+        label="💬 Complete Conversation Transcription",
+        value="",
+        interactive=False,
+        lines=12,
+        placeholder="Complete conversation transcription will appear here when you stop recording..."
+    )
     
     # Event handlers
     start_btn.click(
         fn=start_recording,
         inputs=[approach_dropdown, microphone_checkbox],
-        outputs=[status_display, start_btn, stop_btn]
+        outputs=[status_display, start_btn, stop_btn, conversation_display]
     )
     
     stop_btn.click(
         fn=stop_recording,
-        outputs=[status_display, start_btn, stop_btn, final_transcription]
+        outputs=[status_display, start_btn, stop_btn, conversation_display, real_time_transcription]
     )
     
-    # Auto-update real-time transcription every 3 seconds
-    def update_realtime():
-        return get_real_time_transcription()
+    # Auto-update real-time transcription every 2 seconds
+    def update_components():
+        return get_real_time_transcription(), check_backend_status()
     
-    # Set up periodic update for real-time transcription
-    app.load(lambda: gr.update(), every=3).then(
-        fn=update_realtime,
-        outputs=[real_time_transcription]
+    # Set up periodic updates
+    app.load(lambda: None, every=2).then(
+        fn=update_components,
+        outputs=[real_time_transcription, backend_status]
     )
     
-    with gr.Row():
+    with gr.Accordion("📖 Instructions", open=False):
         gr.Markdown("""
-        ### Instructions:
-        1. **Select Approach**: Choose between Fast (real-time) or Batch (process all at once) transcription
-        2. **Enable Microphone**: Make sure microphone access is enabled
-        3. **Start Recording**: Click to begin audio capture in 2-minute chunks
-        4. **Monitor Progress**: Watch real-time transcriptions (Fast mode) or wait for final results (Batch mode)
-        5. **Stop Recording**: Click to end session and get final transcription
+        ### How to Use:
+        
+        1. **🔧 Check Backend**: Ensure Azure Speech Services backend is running and configured
+        2. **🤖 Select Approach**: 
+           - **Fast Transcription**: Uses Azure Real-time Speech API for immediate results
+           - **Batch Transcription**: Uses Azure Batch API for processing all audio at once
+        3. **🎙️ Enable Microphone**: Make sure microphone access is enabled (simulated in demo)
+        4. **▶️ Start Recording**: Begin audio capture in 2-minute chunks
+        5. **👀 Monitor Progress**: 
+           - **Fast Mode**: Watch real-time transcriptions appear
+           - **Batch Mode**: See chunk collection progress
+        6. **⏹️ Stop Recording**: End session and get complete conversation transcription
+        7. **💾 File Export**: Conversation is automatically saved to text file for later processing
+        
+        ### Features:
+        - ✅ Azure Speech Services integration
+        - ✅ Real-time transcription (Fast mode)
+        - ✅ Batch processing (Batch mode)
+        - ✅ Conversation export to text file
+        - ✅ Session management
+        - ✅ Error handling
         
         **Note**: This demo uses simulated audio. In production, replace with actual microphone input.
         """)
+    
+    gr.Markdown("""
+    ---
+    **Powered by Azure Speech Services** | **FastAPI Backend** | **Gradio Frontend**
+    """)
 
 if __name__ == "__main__":
-    # Check if backend is running
-    try:
-        response = requests.get(f"{BACKEND_URL}/")
-        if response.status_code == 200:
-            print("✅ Backend is running!")
-        else:
-            print("❌ Backend is not responding properly")
-    except:
-        print("❌ Backend is not running! Please start the FastAPI server first.")
-        print("Run: cd backend && python main.py")
+    print("🚀 Starting Azure Speech Audio Transcription Frontend...")
     
     app.launch(
         server_name="0.0.0.0",
         server_port=7860,
         share=False,
-        debug=True
+        debug=True,
+        show_api=False
     )
