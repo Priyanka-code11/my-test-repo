@@ -50,35 +50,54 @@ def create_session():
 
 def upload_audio_chunk(session_id, approach, chunk_id, audio_data):
     """Upload audio chunk to Azure backend"""
+    temp_file_path = None
     try:
-        # Convert audio data to WAV format
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-            # Write WAV header and data
-            with wave.open(tmp_file.name, 'wb') as wav_file:
-                wav_file.setnchannels(1)  # Mono
-                wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setframerate(16000)  # 16kHz
-                wav_file.writeframes(audio_data.tobytes())
+        # Create temporary file with manual cleanup for Windows compatibility
+        temp_file_path = tempfile.mktemp(suffix=".wav")
+        
+        # Write WAV header and data
+        with wave.open(temp_file_path, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(16000)  # 16kHz
+            wav_file.writeframes(audio_data.tobytes())
+        
+        # Ensure the wave file is fully closed before reading
+        time.sleep(0.1)  # Small delay to ensure file is released
+        
+        # Upload to Azure backend
+        with open(temp_file_path, 'rb') as audio_file:
+            files = {'audio_file': ('audio.wav', audio_file, 'audio/wav')}
+            data = {
+                'session_id': session_id,
+                'approach': approach,
+                'chunk_id': chunk_id
+            }
+            response = requests.post(f"{BACKEND_URL}/upload_audio", files=files, data=data)
+        
+        # Cleanup temp file with retry for Windows
+        try:
+            os.unlink(temp_file_path)
+        except (PermissionError, FileNotFoundError):
+            # Try again after a short delay
+            time.sleep(0.2)
+            try:
+                os.unlink(temp_file_path)
+            except (PermissionError, FileNotFoundError):
+                print(f"Warning: Could not delete temporary file {temp_file_path}")
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Upload failed: {response.text}"}
             
-            # Upload to Azure backend
-            with open(tmp_file.name, 'rb') as audio_file:
-                files = {'audio_file': audio_file}
-                data = {
-                    'session_id': session_id,
-                    'approach': approach,
-                    'chunk_id': chunk_id
-                }
-                response = requests.post(f"{BACKEND_URL}/upload_audio", files=files, data=data)
-                
-            # Cleanup temp file
-            os.unlink(tmp_file.name)
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {"error": f"Upload failed: {response.text}"}
-                
     except Exception as e:
+        # Ensure cleanup even on error
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
         return {"error": f"Error uploading audio: {str(e)}"}
 
 def process_batch_transcription(session_id):
