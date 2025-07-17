@@ -263,12 +263,12 @@ def get_real_time_transcription():
     else:
         return "🔄 Processing audio chunks..."
 
-# Create Gradio interface with Azure Speech Services theme
-with gr.Blocks(
-    title="Azure Speech Audio Transcription", 
-    theme=gr.themes.Soft(),
-    css=".gradio-container {background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);}"
-) as app:
+def refresh_status():
+    """Manual refresh function for status updates"""
+    return get_real_time_transcription(), check_backend_status()
+
+# Create Gradio interface (compatible with older versions)
+with gr.Blocks(title="Azure Speech Audio Transcription", theme=gr.themes.Soft()) as app:
     
     gr.Markdown("""
     # 🎤 Azure Speech Services Audio Transcription
@@ -303,8 +303,11 @@ with gr.Blocks(
             gr.Markdown("### 🎛️ Controls")
             
             with gr.Row():
-                start_btn = gr.Button("🎙️ Start Recording", variant="primary", size="lg")
-                stop_btn = gr.Button("⏹️ Stop Recording", variant="stop", interactive=False, size="lg")
+                start_btn = gr.Button("🎙️ Start Recording", variant="primary")
+                stop_btn = gr.Button("⏹️ Stop Recording", variant="stop", interactive=False)
+            
+            # Manual refresh button for compatibility
+            refresh_btn = gr.Button("🔄 Refresh Status", variant="secondary")
         
         with gr.Column(scale=2):
             gr.Markdown("### 📊 Live Status & Results")
@@ -345,28 +348,11 @@ with gr.Blocks(
         outputs=[status_display, start_btn, stop_btn, conversation_display, real_time_transcription]
     )
     
-    # Auto-update real-time transcription every 2 seconds
-    def update_components():
-        return get_real_time_transcription(), check_backend_status()
-    
-    # Set up periodic updates (compatible with different Gradio versions)
-    try:
-        # For newer Gradio versions (4.0+)
-        app.load(lambda: None, every=2).then(
-            fn=update_components,
-            outputs=[real_time_transcription, backend_status]
-        )
-    except TypeError:
-        # For older Gradio versions, use a different approach
-        print("📝 Note: Using compatibility mode for older Gradio version")
-        print("💡 For auto-updates, please upgrade Gradio: pip install --upgrade gradio")
-        
-        # Fallback: Manual refresh button for older versions
-        refresh_btn = gr.Button("🔄 Refresh Status", size="sm")
-        refresh_btn.click(
-            fn=update_components,
-            outputs=[real_time_transcription, backend_status]
-        )
+    # Manual refresh for compatibility with older Gradio versions
+    refresh_btn.click(
+        fn=refresh_status,
+        outputs=[real_time_transcription, backend_status]
+    )
     
     with gr.Accordion("📖 Instructions", open=False):
         gr.Markdown("""
@@ -379,7 +365,7 @@ with gr.Blocks(
         3. **🎙️ Enable Microphone**: Make sure microphone access is enabled (simulated in demo)
         4. **▶️ Start Recording**: Begin audio capture in 2-minute chunks
         5. **👀 Monitor Progress**: 
-           - **Fast Mode**: Watch real-time transcriptions appear
+           - **Fast Mode**: Click "🔄 Refresh Status" to see real-time transcriptions
            - **Batch Mode**: See chunk collection progress
         6. **⏹️ Stop Recording**: End session and get complete conversation transcription
         7. **💾 File Export**: Conversation is automatically saved to text file for later processing
@@ -391,8 +377,10 @@ with gr.Blocks(
         - ✅ Conversation export to text file
         - ✅ Session management
         - ✅ Error handling
+        - ✅ Compatible with older Gradio versions
         
         **Note**: This demo uses simulated audio. In production, replace with actual microphone input.
+        **Compatibility**: This version works with older Gradio versions. Click "🔄 Refresh Status" to update real-time transcriptions.
         """)
     
     gr.Markdown("""
@@ -401,7 +389,7 @@ with gr.Blocks(
     """)
 
 if __name__ == "__main__":
-    print("🚀 Starting Azure Speech Audio Transcription Frontend...")
+    print("🚀 Starting Azure Speech Audio Transcription Frontend (Compatible Version)...")
     
     app.launch(
         server_name="0.0.0.0",
